@@ -9,4 +9,4 @@ typedef struct {
 } Ball;
 
 void reset_ball(Ball *ball, float direction);
-void ball_update(Ball *ball, float deltaTime);
+void ball_update(Ball *ball, float deltaTime, float speed_scale);

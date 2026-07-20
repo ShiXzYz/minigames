@@ -2,8 +2,14 @@
 #include "constants.h"
 #include <math.h>
 
-static void resolve_ball_paddle_collision(Ball *ball, SDL_FRect prev_rect, Paddle *paddle, bool paddle_is_left) {
+static const float magnet_strength = 2.5f;
+static const float curve_accel = 60.0f;
+static const float fireball_speedup = 1.15f;
+
+static bool resolve_ball_paddle_collision(Ball *ball, SDL_FRect prev_rect, Paddle *paddle, bool paddle_is_left,
+                                           const PowerupState *powerups, Uint64 ticks) {
     bool is_colliding = SDL_HasRectIntersectionFloat(&ball->rect, &paddle->rect);
+    bool bounced = false;
 
     if (is_colliding && !paddle->was_colliding) {
         float paddle_front_x = paddle_is_left ? (paddle->rect.x + paddle->rect.w) : paddle->rect.x;
@@ -22,12 +28,21 @@ static void resolve_ball_paddle_collision(Ball *ball, SDL_FRect prev_rect, Paddl
         float ball_center = ball->rect.y + ball->rect.h / 2.0f;
         float relative = (ball_center - paddle_center) / (paddle->rect.h / 2.0f);
         relative = SDL_clamp(relative, -1.0f, 1.0f);
-        float new_vy = relative * max_bounce_speed + paddle->vel * spin_factor;
+
+        bool fireball = powerup_is_active_any(powerups, POWERUP_FIREBALL, ticks);
+        float new_vy = relative * max_bounce_speed;
+        if (!fireball) {
+            new_vy += paddle->vel * spin_factor;
+        }
 
         if (crossed_front_face) {
             ball->rect.x = paddle_is_left ? (paddle->rect.x + paddle->rect.w) : (paddle->rect.x - ball->rect.w);
             ball->vx = paddle_is_left ? fabsf(ball->vx) : -fabsf(ball->vx);
             ball->vy = new_vy;
+            if (fireball) {
+                ball->vx *= fireball_speedup;
+            }
+            bounced = true;
         } else {
             ball->rect.x = paddle_is_left ? (paddle->rect.x - ball->rect.w) : (paddle->rect.x + paddle->rect.w);
             ball->vy = new_vy;
@@ -35,44 +50,120 @@ static void resolve_ball_paddle_collision(Ball *ball, SDL_FRect prev_rect, Paddl
     }
 
     paddle->was_colliding = is_colliding;
+    return bounced;
+}
+
+static const Uint64 serve_delay_ms = 500;
+
+static void enter_state(GameState *game, GameStateKind state, Uint64 ticks) {
+    game->state = state;
+    game->state_entered_at = ticks;
+    if (state == GAME_WAITING) {
+        powerup_reset_round(&game->powerups, ticks);
+    }
 }
 
 void game_update(GameState *game, Ball *ball, Paddle *left_paddle, Paddle *right_paddle,
-                  const bool *keystate, float deltaTime) {
-    paddle_update(left_paddle, keystate, SDL_SCANCODE_W, SDL_SCANCODE_S, deltaTime);
-    paddle_update(right_paddle, keystate, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, deltaTime);
+                  const bool *keystate, float deltaTime, Uint64 ticks) {
+    paddle_update(left_paddle, keystate, SDL_SCANCODE_W, SDL_SCANCODE_S, deltaTime, &game->powerups, true, ticks);
+    paddle_update(right_paddle, keystate, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, deltaTime, &game->powerups, false, ticks);
 
-    // Ball stays parked at center until a player signals they're ready.
-    if (!game->started) {
-        if (keystate[SDL_SCANCODE_RETURN] || keystate[SDL_SCANCODE_KP_ENTER] ||
-            keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_S] ||
-            keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_DOWN]) {
-            game->started = true;
+    bool confirm_pressed = keystate[SDL_SCANCODE_RETURN] || keystate[SDL_SCANCODE_KP_ENTER];
+    bool up_pressed = keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_W];
+    bool down_pressed = keystate[SDL_SCANCODE_DOWN] || keystate[SDL_SCANCODE_S];
+
+    bool confirm_just_pressed = confirm_pressed && !game->prev_confirm;
+    bool up_just_pressed = up_pressed && !game->prev_up;
+    bool down_just_pressed = down_pressed && !game->prev_down;
+
+    game->prev_confirm = confirm_pressed;
+    game->prev_up = up_pressed;
+    game->prev_down = down_pressed;
+
+    if (game->state == GAME_MENU) {
+        if (confirm_just_pressed) {
+            enter_state(game, GAME_MODE_SELECT, ticks);
         }
-    }
-
-    if (!game->started) {
         return;
     }
 
-    SDL_FRect ball_prev_rect = ball->rect;
-    ball_update(ball, deltaTime);
+    if (game->state == GAME_MODE_SELECT) {
+        if (up_just_pressed || down_just_pressed) {
+            game->mode = (game->mode == MODE_CLASSIC) ? MODE_POWER_PLAY : MODE_CLASSIC;
+        }
+        if (confirm_just_pressed) {
+            game->left_score = 0;
+            game->right_score = 0;
+            powerup_reset_match(&game->powerups, ticks);
+            enter_state(game, GAME_WAITING, ticks);
+        }
+        return;
+    }
 
-    // scoring
+    if (game->state == GAME_WAITING) {
+        bool ready_to_serve = (ticks - game->state_entered_at) >= serve_delay_ms;
+        if (ready_to_serve &&
+            (confirm_pressed ||
+             keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_S] ||
+             keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_DOWN])) {
+            enter_state(game, GAME_PLAYING, ticks);
+        }
+        return;
+    }
+
+    bool power_play = (game->mode == MODE_POWER_PLAY);
+
+    if (power_play) {
+        float curve_dir = powerup_get_extra(&game->powerups, POWERUP_CURVE_BALL, ticks);
+        ball->vy += curve_dir * curve_accel * deltaTime;
+
+        if (powerup_is_active(&game->powerups, POWERUP_MAGNET, true, ticks)) {
+            float target = left_paddle->rect.y + left_paddle->rect.h / 2.0f;
+            float ball_center = ball->rect.y + ball->rect.h / 2.0f;
+            ball->vy += (target - ball_center) * magnet_strength * deltaTime;
+        }
+        if (powerup_is_active(&game->powerups, POWERUP_MAGNET, false, ticks)) {
+            float target = right_paddle->rect.y + right_paddle->rect.h / 2.0f;
+            float ball_center = ball->rect.y + ball->rect.h / 2.0f;
+            ball->vy += (target - ball_center) * magnet_strength * deltaTime;
+        }
+    }
+
+    float speed_scale = 1.0f;
+    if (power_play && powerup_is_active_any(&game->powerups, POWERUP_SLOW_MOTION, ticks)) {
+        speed_scale = 0.5f;
+    }
+
+    SDL_FRect ball_prev_rect = ball->rect;
+    ball_update(ball, deltaTime, speed_scale);
+
     if (ball->rect.x + ball->rect.w < 0) {
-        game->right_score++;
-        SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
-        reset_ball(ball, 1.0f);
-        game->started = false;
+        if (power_play && powerup_consume_shield(&game->powerups, true)) {
+            reset_ball(ball, 1.0f);
+        } else {
+            game->right_score++;
+            SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
+            reset_ball(ball, 1.0f);
+        }
+        enter_state(game, GAME_WAITING, ticks);
     }
 
     if (ball->rect.x > win_width) {
-        game->left_score++;
-        SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
-        reset_ball(ball, -1.0f);
-        game->started = false;
+        if (power_play && powerup_consume_shield(&game->powerups, false)) {
+            reset_ball(ball, -1.0f);
+        } else {
+            game->left_score++;
+            SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
+            reset_ball(ball, -1.0f);
+        }
+        enter_state(game, GAME_WAITING, ticks);
     }
 
-    resolve_ball_paddle_collision(ball, ball_prev_rect, left_paddle, true);
-    resolve_ball_paddle_collision(ball, ball_prev_rect, right_paddle, false);
+    bool left_bounced = resolve_ball_paddle_collision(ball, ball_prev_rect, left_paddle, true, &game->powerups, ticks);
+    bool right_bounced = resolve_ball_paddle_collision(ball, ball_prev_rect, right_paddle, false, &game->powerups, ticks);
+
+    if (power_play) {
+        powerup_note_touch(&game->powerups, left_bounced ? TOUCH_LEFT : (right_bounced ? TOUCH_RIGHT : TOUCH_NONE));
+        powerup_update(&game->powerups, ball, ticks);
+    }
 }

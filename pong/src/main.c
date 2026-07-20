@@ -13,6 +13,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    SDL_srand((Uint64)SDL_GetPerformanceCounter());
+
     SDL_Window *window = SDL_CreateWindow("Pong", win_width, win_height, 0);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
@@ -32,7 +34,7 @@ int main(int argc, char *argv[]) {
     Paddle right_paddle = { { 750.0f, win_height / 2.0f - paddle_height / 2.0f, paddle_width, paddle_height }, 0.0f, false };
     Ball ball = { { win_width / 2.0f - ball_size / 2.0f, win_height / 2.0f - ball_size / 2.0f, ball_size, ball_size }, ball_start_speed, -ball_start_speed };
 
-    GameState game = { 0, 0, false };
+    GameState game = { 0, 0, GAME_MENU, 0 };
 
     Uint64 prevTime = SDL_GetTicks();
 
@@ -52,8 +54,8 @@ int main(int argc, char *argv[]) {
         float deltaTime = deltaMS / 1000.0f;
         prevTime = curTime;
 
-        game_update(&game, &ball, &left_paddle, &right_paddle, keystate, deltaTime);
-        render_frame(renderer, &ball, &left_paddle, &right_paddle, &game);
+        game_update(&game, &ball, &left_paddle, &right_paddle, keystate, deltaTime, curTime);
+        render_frame(renderer, &ball, &left_paddle, &right_paddle, &game, curTime);
     }
 
     SDL_DestroyRenderer(renderer);

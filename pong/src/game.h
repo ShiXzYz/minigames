@@ -5,14 +5,31 @@
 
 #include "ball.h"
 #include "paddle.h"
+#include "powerup.h"
+
+typedef enum {
+    GAME_MENU,
+    GAME_MODE_SELECT,
+    GAME_WAITING,
+    GAME_PLAYING
+} GameStateKind;
+
+typedef enum {
+    MODE_CLASSIC,
+    MODE_POWER_PLAY
+} GameMode;
 
 typedef struct {
     int left_score;
     int right_score;
-    bool started;
+    GameStateKind state;
+    Uint64 state_entered_at;
+    GameMode mode;
+    bool prev_up;
+    bool prev_down;
+    bool prev_confirm;
+    PowerupState powerups;
 } GameState;
 
-// Runs one frame of simulation: paddle movement, the start gate, ball physics,
-// scoring, and paddle collisions. `keystate` is the array from SDL_GetKeyboardState.
 void game_update(GameState *game, Ball *ball, Paddle *left_paddle, Paddle *right_paddle,
-                  const bool *keystate, float deltaTime);
+                  const bool *keystate, float deltaTime, Uint64 ticks);
