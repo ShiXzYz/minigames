@@ -13,7 +13,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SDL3)
 
-add_executable(pong src/main.c)
+add_executable(pong
+    src/main.c
+    src/constants.c
+    src/ball.c
+    src/paddle.c
+    src/game.c
+    src/renderer.c
+)
 target_link_libraries(pong PRIVATE SDL3::SDL3)
 
 # Copy the SDL3 DLL next to the exe so `pong.exe` runs without installing SDL system-wide.
