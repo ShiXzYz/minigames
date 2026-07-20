@@ -5,7 +5,9 @@ static const Uint64 spawn_interval_ms = 7000;
 static const float pickup_box_size = 40.0f;
 
 static Uint64 effect_duration_ms(PowerupType type) {
-    return (type == POWERUP_FIREBALL) ? 8000 : 5000;
+    if (type == POWERUP_FIREBALL) return 8000;
+    if (type == POWERUP_SPLIT_SHOT) return 6000;
+    return 5000;
 }
 
 static int find_effect_slot(PowerupState *state, PowerupType type, bool affects_left) {
@@ -42,6 +44,16 @@ void powerup_grant(PowerupState *state, PowerupType type, bool picker_is_left, U
         return;
     }
 
+    if (type == POWERUP_HOLD_SHOT) {
+        state->pending_hold_shot = true;
+        state->pending_hold_shot_is_left = picker_is_left;
+        return;
+    }
+
+    if (type == POWERUP_SPLIT_SHOT) {
+        state->pending_split_shot = true;
+    }
+
     bool affects_left = picker_is_left;
     if (type == POWERUP_TINY_PADDLE || type == POWERUP_INVERT_CONTROLS) {
         affects_left = !picker_is_left;
@@ -66,6 +78,8 @@ void powerup_reset_round(PowerupState *state, Uint64 ticks) {
     state->pickup.active = false;
     state->next_spawn_at = ticks + spawn_interval_ms;
     state->last_touch = TOUCH_NONE;
+    state->pending_hold_shot = false;
+    state->pending_split_shot = false;
 }
 
 void powerup_reset_match(PowerupState *state, Uint64 ticks) {

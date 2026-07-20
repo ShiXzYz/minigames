@@ -167,9 +167,13 @@ static void set_paddle_color(SDL_Renderer *renderer, const GameState *game, bool
     }
 }
 
-static void set_ball_color(SDL_Renderer *renderer, const GameState *game, Uint64 ticks) {
+static void set_ball_color(SDL_Renderer *renderer, const GameState *game, const Ball *ball, Uint64 ticks) {
     const PowerupState *pu = &game->powerups;
-    if (powerup_is_active_any(pu, POWERUP_FIREBALL, ticks)) {
+    if (ball->held) {
+        SDL_SetRenderDrawColor(renderer, 255, 255, 150, 255);
+    } else if (powerup_is_active_any(pu, POWERUP_SPLIT_SHOT, ticks)) {
+        SDL_SetRenderDrawColor(renderer, 180, 255, 80, 255);
+    } else if (powerup_is_active_any(pu, POWERUP_FIREBALL, ticks)) {
         SDL_SetRenderDrawColor(renderer, 255, 120, 0, 255);
     } else if (powerup_is_active_any(pu, POWERUP_SLOW_MOTION, ticks)) {
         SDL_SetRenderDrawColor(renderer, 120, 180, 255, 255);
@@ -194,6 +198,8 @@ static const char *powerup_display_name(PowerupType type) {
         case POWERUP_INVERT_CONTROLS: return "INVERT CONTROLS";
         case POWERUP_INVISIBLE_BALL: return "INVISIBLE BALL";
         case POWERUP_SHIELD: return "SHIELD";
+        case POWERUP_SPLIT_SHOT: return "SPLIT SHOT";
+        case POWERUP_HOLD_SHOT: return "HOLD AND SHOOT";
         case POWERUP_CHAOS_BOX: return "CHAOS BOX";
         default: return "";
     }
@@ -221,7 +227,7 @@ static void draw_powerup_announcement(SDL_Renderer *renderer, const GameState *g
     draw_text_centered(renderer, powerup_display_name(pu->last_activated_type), 20.0f + y_offset, 4.0f, 3.0f);
 }
 
-void render_frame(SDL_Renderer *renderer, const Ball *ball, const Paddle *left_paddle,
+void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
                    const Paddle *right_paddle, const GameState *game, Uint64 ticks) {
     SDL_SetRenderDrawColor(renderer, 10, 10, 10, 255);
     SDL_RenderClear(renderer);
@@ -233,6 +239,30 @@ void render_frame(SDL_Renderer *renderer, const Ball *ball, const Paddle *left_p
         if ((ticks / 500) % 2 == 0) {
             draw_text_centered(renderer, "PRESS ENTER TO START", 400.0f, 3.0f, 2.0f);
         }
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_PAUSED) {
+        draw_text_centered(renderer, "PAUSED", 150.0f, 7.0f, 4.0f);
+        draw_text_centered(renderer, "RETURN TO MENU", 280.0f, 4.0f, 3.0f);
+
+        const float yes_y = 360.0f;
+        const float no_y = 420.0f;
+        const float option_pixel = 4.0f;
+        const float option_spacing = 3.0f;
+
+        draw_text_centered(renderer, "YES", yes_y, option_pixel, option_spacing);
+        draw_text_centered(renderer, "NO", no_y, option_pixel, option_spacing);
+
+        const char *selected_label = game->pause_confirm_selected ? "YES" : "NO";
+        float selected_y = game->pause_confirm_selected ? yes_y : no_y;
+        float underline_w = text_width(selected_label, option_pixel, option_spacing);
+        SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
+        SDL_RenderFillRect(renderer, &underline);
+
+        draw_text_centered(renderer, "UP DOWN ENTER", 500.0f, 2.0f, 2.0f);
+
         SDL_RenderPresent(renderer);
         return;
     }
@@ -297,16 +327,21 @@ void render_frame(SDL_Renderer *renderer, const Ball *ball, const Paddle *left_p
     }
 
     bool ball_invisible = power_play && powerup_is_active_any(&game->powerups, POWERUP_INVISIBLE_BALL, ticks);
-    if (ball_invisible) {
-        if ((ticks / 150) % 2 == 0) {
-            SDL_SetRenderDrawColor(renderer, 90, 90, 90, 255);
+    for (int i = 0; i < MAX_BALLS; i++) {
+        const Ball *ball = &game->balls[i];
+        if (!ball->active) continue;
+
+        if (ball_invisible && !ball->held) {
+            if ((ticks / 150) % 2 == 0) {
+                SDL_SetRenderDrawColor(renderer, 90, 90, 90, 255);
+                SDL_RenderFillRect(renderer, &ball->rect);
+            }
+        } else {
+            if (power_play) {
+                set_ball_color(renderer, game, ball, ticks);
+            }
             SDL_RenderFillRect(renderer, &ball->rect);
         }
-    } else {
-        if (power_play) {
-            set_ball_color(renderer, game, ticks);
-        }
-        SDL_RenderFillRect(renderer, &ball->rect);
     }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);

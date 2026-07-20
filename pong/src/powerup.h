@@ -16,6 +16,8 @@ typedef enum {
     POWERUP_INVERT_CONTROLS,
     POWERUP_INVISIBLE_BALL,
     POWERUP_SHIELD,
+    POWERUP_SPLIT_SHOT,
+    POWERUP_HOLD_SHOT,
     POWERUP_CHAOS_BOX,
     POWERUP_COUNT
 } PowerupType;
@@ -51,6 +53,9 @@ typedef struct {
     PowerupType last_activated_type;
     Uint64 last_activated_at;
     bool has_last_activated;
+    bool pending_hold_shot;
+    bool pending_hold_shot_is_left;
+    bool pending_split_shot;
 } PowerupState;
 
 void powerup_reset_match(PowerupState *state, Uint64 ticks);

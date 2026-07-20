@@ -7,6 +7,11 @@ void reset_ball(Ball *ball, float direction) {
 
     ball->vx = direction * ball_start_speed;
     ball->vy = 0.0f;
+
+    ball->active = true;
+    ball->was_colliding_left = false;
+    ball->was_colliding_right = false;
+    ball->held = false;
 }
 
 void ball_update(Ball *ball, float deltaTime, float speed_scale) {

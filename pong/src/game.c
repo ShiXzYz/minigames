@@ -5,13 +5,17 @@
 static const float magnet_strength = 2.5f;
 static const float curve_accel = 60.0f;
 static const float fireball_speedup = 1.15f;
+static const float split_spread = 150.0f;
+static const float hold_bob_speed = 3.0f;
+static const float hold_bob_range = 80.0f;
 
 static bool resolve_ball_paddle_collision(Ball *ball, SDL_FRect prev_rect, Paddle *paddle, bool paddle_is_left,
                                            const PowerupState *powerups, Uint64 ticks) {
     bool is_colliding = SDL_HasRectIntersectionFloat(&ball->rect, &paddle->rect);
+    bool *was_colliding = paddle_is_left ? &ball->was_colliding_left : &ball->was_colliding_right;
     bool bounced = false;
 
-    if (is_colliding && !paddle->was_colliding) {
+    if (is_colliding && !*was_colliding) {
         float paddle_front_x = paddle_is_left ? (paddle->rect.x + paddle->rect.w) : paddle->rect.x;
         float prev_leading_x = paddle_is_left ? prev_rect.x : (prev_rect.x + prev_rect.w);
         float cur_leading_x  = paddle_is_left ? ball->rect.x : (ball->rect.x + ball->rect.w);
@@ -49,7 +53,7 @@ static bool resolve_ball_paddle_collision(Ball *ball, SDL_FRect prev_rect, Paddl
         }
     }
 
-    paddle->was_colliding = is_colliding;
+    *was_colliding = is_colliding;
     return bounced;
 }
 
@@ -63,22 +67,44 @@ static void enter_state(GameState *game, GameStateKind state, Uint64 ticks) {
     }
 }
 
-void game_update(GameState *game, Ball *ball, Paddle *left_paddle, Paddle *right_paddle,
+static void end_point(GameState *game, Uint64 ticks, float serve_direction) {
+    reset_ball(&game->balls[0], serve_direction);
+    for (int i = 1; i < MAX_BALLS; i++) {
+        game->balls[i].active = false;
+    }
+    enter_state(game, GAME_WAITING, ticks);
+}
+
+static bool any_ball_active(const GameState *game) {
+    for (int i = 0; i < MAX_BALLS; i++) {
+        if (game->balls[i].active) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                   const bool *keystate, float deltaTime, Uint64 ticks) {
-    paddle_update(left_paddle, keystate, SDL_SCANCODE_W, SDL_SCANCODE_S, deltaTime, &game->powerups, true, ticks);
-    paddle_update(right_paddle, keystate, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, deltaTime, &game->powerups, false, ticks);
+    if (game->state != GAME_PAUSED) {
+        paddle_update(left_paddle, keystate, SDL_SCANCODE_W, SDL_SCANCODE_S, deltaTime, &game->powerups, true, ticks);
+        paddle_update(right_paddle, keystate, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, deltaTime, &game->powerups, false, ticks);
+    }
 
     bool confirm_pressed = keystate[SDL_SCANCODE_RETURN] || keystate[SDL_SCANCODE_KP_ENTER];
     bool up_pressed = keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_W];
     bool down_pressed = keystate[SDL_SCANCODE_DOWN] || keystate[SDL_SCANCODE_S];
+    bool escape_pressed = keystate[SDL_SCANCODE_ESCAPE];
 
     bool confirm_just_pressed = confirm_pressed && !game->prev_confirm;
     bool up_just_pressed = up_pressed && !game->prev_up;
     bool down_just_pressed = down_pressed && !game->prev_down;
+    bool escape_just_pressed = escape_pressed && !game->prev_escape;
 
     game->prev_confirm = confirm_pressed;
     game->prev_up = up_pressed;
     game->prev_down = down_pressed;
+    game->prev_escape = escape_pressed;
 
     if (game->state == GAME_MENU) {
         if (confirm_just_pressed) {
@@ -100,6 +126,33 @@ void game_update(GameState *game, Ball *ball, Paddle *left_paddle, Paddle *right
         return;
     }
 
+    if (game->state == GAME_PAUSED) {
+        if (up_just_pressed || down_just_pressed) {
+            game->pause_confirm_selected = !game->pause_confirm_selected;
+        }
+        if (escape_just_pressed) {
+            enter_state(game, game->paused_from, ticks);
+            return;
+        }
+        if (confirm_just_pressed) {
+            if (game->pause_confirm_selected) {
+                enter_state(game, GAME_MENU, ticks);
+            } else {
+                enter_state(game, game->paused_from, ticks);
+            }
+        }
+        return;
+    }
+
+    if (game->state == GAME_WAITING || game->state == GAME_PLAYING) {
+        if (escape_just_pressed) {
+            game->paused_from = game->state;
+            game->pause_confirm_selected = false;
+            enter_state(game, GAME_PAUSED, ticks);
+            return;
+        }
+    }
+
     if (game->state == GAME_WAITING) {
         bool ready_to_serve = (ticks - game->state_entered_at) >= serve_delay_ms;
         if (ready_to_serve &&
@@ -114,56 +167,96 @@ void game_update(GameState *game, Ball *ball, Paddle *left_paddle, Paddle *right
     bool power_play = (game->mode == MODE_POWER_PLAY);
 
     if (power_play) {
-        float curve_dir = powerup_get_extra(&game->powerups, POWERUP_CURVE_BALL, ticks);
-        ball->vy += curve_dir * curve_accel * deltaTime;
-
-        if (powerup_is_active(&game->powerups, POWERUP_MAGNET, true, ticks)) {
-            float target = left_paddle->rect.y + left_paddle->rect.h / 2.0f;
-            float ball_center = ball->rect.y + ball->rect.h / 2.0f;
-            ball->vy += (target - ball_center) * magnet_strength * deltaTime;
-        }
-        if (powerup_is_active(&game->powerups, POWERUP_MAGNET, false, ticks)) {
-            float target = right_paddle->rect.y + right_paddle->rect.h / 2.0f;
-            float ball_center = ball->rect.y + ball->rect.h / 2.0f;
-            ball->vy += (target - ball_center) * magnet_strength * deltaTime;
+        bool split_active = powerup_is_active_any(&game->powerups, POWERUP_SPLIT_SHOT, ticks);
+        if (split_active && !game->balls[1].active && !game->balls[0].held) {
+            game->balls[1] = game->balls[0];
+            game->balls[1].vy -= split_spread;
+            game->balls[0].vy += split_spread;
+        } else if (!split_active) {
+            game->balls[1].active = false;
         }
     }
 
-    float speed_scale = 1.0f;
-    if (power_play && powerup_is_active_any(&game->powerups, POWERUP_SLOW_MOTION, ticks)) {
-        speed_scale = 0.5f;
-    }
+    for (int i = 0; i < MAX_BALLS; i++) {
+        Ball *ball = &game->balls[i];
+        if (!ball->active) continue;
 
-    SDL_FRect ball_prev_rect = ball->rect;
-    ball_update(ball, deltaTime, speed_scale);
+        if (ball->held) {
+            Paddle *holder = ball->held_by_left ? left_paddle : right_paddle;
+            float bob = sinf((float)(ticks - ball->held_since) / 1000.0f * hold_bob_speed);
+            float holder_center_y = holder->rect.y + holder->rect.h / 2.0f;
 
-    if (ball->rect.x + ball->rect.w < 0) {
-        if (power_play && powerup_consume_shield(&game->powerups, true)) {
-            reset_ball(ball, 1.0f);
-        } else {
-            game->right_score++;
-            SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
-            reset_ball(ball, 1.0f);
+            ball->rect.x = ball->held_by_left ? (holder->rect.x + holder->rect.w + 4.0f) : (holder->rect.x - ball->rect.w - 4.0f);
+            ball->rect.y = SDL_clamp(holder_center_y + bob * hold_bob_range - ball->rect.h / 2.0f, 0.0f, win_height - ball->rect.h);
+
+            if (confirm_just_pressed) {
+                float launch_dir = ball->held_by_left ? 1.0f : -1.0f;
+                ball->vx = launch_dir * ball_start_speed;
+                ball->vy = bob * max_bounce_speed;
+                ball->held = false;
+            }
+            continue;
         }
-        enter_state(game, GAME_WAITING, ticks);
-    }
 
-    if (ball->rect.x > win_width) {
-        if (power_play && powerup_consume_shield(&game->powerups, false)) {
-            reset_ball(ball, -1.0f);
-        } else {
-            game->left_score++;
-            SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
-            reset_ball(ball, -1.0f);
+        if (power_play) {
+            float curve_dir = powerup_get_extra(&game->powerups, POWERUP_CURVE_BALL, ticks);
+            ball->vy += curve_dir * curve_accel * deltaTime;
+
+            if (powerup_is_active(&game->powerups, POWERUP_MAGNET, true, ticks)) {
+                float target = left_paddle->rect.y + left_paddle->rect.h / 2.0f;
+                float ball_center = ball->rect.y + ball->rect.h / 2.0f;
+                ball->vy += (target - ball_center) * magnet_strength * deltaTime;
+            }
+            if (powerup_is_active(&game->powerups, POWERUP_MAGNET, false, ticks)) {
+                float target = right_paddle->rect.y + right_paddle->rect.h / 2.0f;
+                float ball_center = ball->rect.y + ball->rect.h / 2.0f;
+                ball->vy += (target - ball_center) * magnet_strength * deltaTime;
+            }
         }
-        enter_state(game, GAME_WAITING, ticks);
-    }
 
-    bool left_bounced = resolve_ball_paddle_collision(ball, ball_prev_rect, left_paddle, true, &game->powerups, ticks);
-    bool right_bounced = resolve_ball_paddle_collision(ball, ball_prev_rect, right_paddle, false, &game->powerups, ticks);
+        float speed_scale = 1.0f;
+        if (power_play && powerup_is_active_any(&game->powerups, POWERUP_SLOW_MOTION, ticks)) {
+            speed_scale = 0.5f;
+        }
 
-    if (power_play) {
-        powerup_note_touch(&game->powerups, left_bounced ? TOUCH_LEFT : (right_bounced ? TOUCH_RIGHT : TOUCH_NONE));
-        powerup_update(&game->powerups, ball, ticks);
+        SDL_FRect ball_prev_rect = ball->rect;
+        ball_update(ball, deltaTime, speed_scale);
+
+        if (ball->rect.x + ball->rect.w < 0) {
+            if (!(power_play && powerup_consume_shield(&game->powerups, true))) {
+                game->right_score++;
+                SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
+            }
+            end_point(game, ticks, 1.0f);
+            break;
+        }
+
+        if (ball->rect.x > win_width) {
+            if (!(power_play && powerup_consume_shield(&game->powerups, false))) {
+                game->left_score++;
+                SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
+            }
+            end_point(game, ticks, -1.0f);
+            break;
+        }
+
+        bool left_bounced = resolve_ball_paddle_collision(ball, ball_prev_rect, left_paddle, true, &game->powerups, ticks);
+        bool right_bounced = resolve_ball_paddle_collision(ball, ball_prev_rect, right_paddle, false, &game->powerups, ticks);
+
+        if (power_play) {
+            powerup_note_touch(&game->powerups, left_bounced ? TOUCH_LEFT : (right_bounced ? TOUCH_RIGHT : TOUCH_NONE));
+            powerup_update(&game->powerups, ball, ticks);
+
+            if (game->powerups.pending_hold_shot) {
+                game->powerups.pending_hold_shot = false;
+                if (!ball->held) {
+                    ball->held = true;
+                    ball->held_by_left = game->powerups.pending_hold_shot_is_left;
+                    ball->held_since = ticks;
+                    ball->vx = 0.0f;
+                    ball->vy = 0.0f;
+                }
+            }
+        }
     }
 }
