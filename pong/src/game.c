@@ -167,12 +167,15 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
     bool power_play = (game->mode == MODE_POWER_PLAY);
 
     if (power_play) {
-        bool split_active = powerup_is_active_any(&game->powerups, POWERUP_SPLIT_SHOT, ticks);
-        if (split_active && !game->balls[1].active && !game->balls[0].held) {
-            game->balls[1] = game->balls[0];
-            game->balls[1].vy -= split_spread;
-            game->balls[0].vy += split_spread;
-        } else if (!split_active) {
+        if (game->powerups.pending_split_shot) {
+            game->powerups.pending_split_shot = false;
+            if (!game->balls[0].held) {
+                game->balls[1] = game->balls[0];
+                game->balls[1].vy -= split_spread;
+                game->balls[0].vy += split_spread;
+            }
+        }
+        if (!powerup_is_active_any(&game->powerups, POWERUP_SPLIT_SHOT, ticks)) {
             game->balls[1].active = false;
         }
     }
@@ -227,8 +230,13 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                 game->right_score++;
                 SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
             }
-            end_point(game, ticks, 1.0f);
-            break;
+            ball->active = false;
+            ball->held = false;
+            if (!any_ball_active(game)) {
+                end_point(game, ticks, 1.0f);
+                break;
+            }
+            continue;
         }
 
         if (ball->rect.x > win_width) {
@@ -236,8 +244,13 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                 game->left_score++;
                 SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
             }
-            end_point(game, ticks, -1.0f);
-            break;
+            ball->active = false;
+            ball->held = false;
+            if (!any_ball_active(game)) {
+                end_point(game, ticks, -1.0f);
+                break;
+            }
+            continue;
         }
 
         bool left_bounced = resolve_ball_paddle_collision(ball, ball_prev_rect, left_paddle, true, &game->powerups, ticks);
