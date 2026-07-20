@@ -20,6 +20,7 @@ add_executable(pong
     src/paddle.c
     src/game.c
     src/renderer.c
+    src/powerup.c
 )
 target_link_libraries(pong PRIVATE SDL3::SDL3)
 

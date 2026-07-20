@@ -7,9 +7,14 @@ void reset_ball(Ball *ball, float direction) {
 
     ball->vx = direction * ball_start_speed;
     ball->vy = 0.0f;
+
+    ball->active = true;
+    ball->was_colliding_left = false;
+    ball->was_colliding_right = false;
+    ball->held = false;
 }
 
-void ball_update(Ball *ball, float deltaTime) {
+void ball_update(Ball *ball, float deltaTime, float speed_scale) {
     if (ball->rect.y < 0) {
         ball->rect.y = 0;
         ball->vy = -ball->vy;
@@ -19,6 +24,6 @@ void ball_update(Ball *ball, float deltaTime) {
         ball->vy = -ball->vy;
     }
 
-    ball->rect.x += ball->vx * deltaTime;
-    ball->rect.y += ball->vy * deltaTime;
+    ball->rect.x += ball->vx * speed_scale * deltaTime;
+    ball->rect.y += ball->vy * speed_scale * deltaTime;
 }
