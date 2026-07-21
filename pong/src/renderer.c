@@ -227,6 +227,24 @@ static void draw_powerup_announcement(SDL_Renderer *renderer, const GameState *g
     draw_text_centered(renderer, powerup_display_name(pu->last_activated_type), 20.0f + y_offset, 4.0f, 3.0f);
 }
 
+static bool underline_blink_visible(Uint64 changed_at, Uint64 ticks) {
+    const Uint64 blink_duration = 480;
+    const Uint64 blink_interval = 80;
+    Uint64 elapsed = ticks - changed_at;
+    if (elapsed >= blink_duration) return true;
+    return (elapsed / blink_interval) % 2 == 0;
+}
+
+static const char *win_score_label(int win_score) {
+    switch (win_score) {
+        case 5: return "FIVE";
+        case 7: return "SEVEN";
+        case 11: return "ELEVEN";
+        case 21: return "TWENTY ONE";
+        default: return "UNLIMITED";
+    }
+}
+
 void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
                    const Paddle *right_paddle, const GameState *game, Uint64 ticks) {
     SDL_SetRenderDrawColor(renderer, 10, 10, 10, 255);
@@ -239,6 +257,76 @@ void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
         if ((ticks / 500) % 2 == 0) {
             draw_text_centered(renderer, "PRESS ENTER TO START", 400.0f, 3.0f, 2.0f);
         }
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_PLAY_TYPE_SELECT) {
+        draw_text_centered(renderer, "SELECT PLAY TYPE", 100.0f, 6.0f, 3.0f);
+
+        const float local_y = 250.0f;
+        const float lan_y = 340.0f;
+        const float option_pixel = 5.0f;
+        const float option_spacing = 3.0f;
+
+        draw_text_centered(renderer, "LOCAL", local_y, option_pixel, option_spacing);
+        draw_text_centered(renderer, "LAN", lan_y, option_pixel, option_spacing);
+
+        const char *selected_label = game->play_type_lan_selected ? "LAN" : "LOCAL";
+        float selected_y = game->play_type_lan_selected ? lan_y : local_y;
+        float underline_w = text_width(selected_label, option_pixel, option_spacing);
+        SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
+        if (underline_blink_visible(game->play_type_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
+
+        draw_text_centered(renderer, "UP DOWN ENTER ESC", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_LAN_ROLE_SELECT) {
+        draw_text_centered(renderer, "HOST OR JOIN", 100.0f, 6.0f, 3.0f);
+
+        const float host_y = 250.0f;
+        const float join_y = 340.0f;
+        const float option_pixel = 5.0f;
+        const float option_spacing = 3.0f;
+
+        draw_text_centered(renderer, "HOST", host_y, option_pixel, option_spacing);
+        draw_text_centered(renderer, "JOIN", join_y, option_pixel, option_spacing);
+
+        const char *selected_label = game->lan_role_host_selected ? "HOST" : "JOIN";
+        float selected_y = game->lan_role_host_selected ? host_y : join_y;
+        float underline_w = text_width(selected_label, option_pixel, option_spacing);
+        SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
+        if (underline_blink_visible(game->lan_role_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
+
+        draw_text_centered(renderer, "UP DOWN ENTER ESC", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_LAN_HOST_WAITING) {
+        draw_text_centered(renderer, "HOSTING", 200.0f, 7.0f, 4.0f);
+        if ((ticks / 500) % 2 == 0) {
+            draw_text_centered(renderer, "WAITING FOR PLAYER", 350.0f, 3.0f, 2.0f);
+        }
+        draw_text_centered(renderer, "ESC TO CANCEL", 460.0f, 2.0f, 2.0f);
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_LAN_CLIENT_SEARCHING) {
+        draw_text_centered(renderer, "JOINING", 200.0f, 7.0f, 4.0f);
+        if ((ticks / 500) % 2 == 0) {
+            draw_text_centered(renderer, "SEARCHING FOR HOST", 350.0f, 3.0f, 2.0f);
+        }
+        draw_text_centered(renderer, "ESC TO CANCEL", 460.0f, 2.0f, 2.0f);
         SDL_RenderPresent(renderer);
         return;
     }
@@ -259,7 +347,9 @@ void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
         float selected_y = game->pause_confirm_selected ? yes_y : no_y;
         float underline_w = text_width(selected_label, option_pixel, option_spacing);
         SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
-        SDL_RenderFillRect(renderer, &underline);
+        if (underline_blink_visible(game->pause_confirm_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
 
         draw_text_centered(renderer, "UP DOWN ENTER", 500.0f, 2.0f, 2.0f);
 
@@ -282,9 +372,50 @@ void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
         float selected_y = (game->mode == MODE_CLASSIC) ? classic_y : power_play_y;
         float underline_w = text_width(selected_label, option_pixel, option_spacing);
         SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
-        SDL_RenderFillRect(renderer, &underline);
+        if (underline_blink_visible(game->mode_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
 
         draw_text_centered(renderer, "UP DOWN ENTER", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_WIN_SCORE_SELECT) {
+        draw_text_centered(renderer, "POINTS TO WIN", 100.0f, 6.0f, 3.0f);
+
+        const float win_score_value_y = 280.0f;
+        const float win_score_pixel = 5.0f;
+        const float win_score_spacing = 3.0f;
+
+        const char *win_score_text = win_score_label(game->win_score);
+        draw_text_centered(renderer, win_score_text, win_score_value_y, win_score_pixel, win_score_spacing);
+
+        float win_score_underline_w = text_width(win_score_text, win_score_pixel, win_score_spacing);
+        SDL_FRect win_score_underline = { win_width / 2.0f - win_score_underline_w / 2.0f, win_score_value_y + 7.0f * win_score_pixel + 6.0f, win_score_underline_w, 3.0f };
+        if (underline_blink_visible(game->win_score_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &win_score_underline);
+        }
+
+        draw_text_centered(renderer, "LEFT RIGHT ENTER", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_OVER) {
+        const char *winner_label = (game->left_score > game->right_score) ? "LEFT WINS" : "RIGHT WINS";
+
+        draw_text_centered(renderer, "GAME OVER", 180.0f, 7.0f, 4.0f);
+        draw_text_centered(renderer, winner_label, 300.0f, 5.0f, 3.0f);
+
+        draw_number(renderer, game->left_score, win_width / 4.0f - 10.0f, 380.0f, 20.0f, 30.0f, 4.0f, 8.0f);
+        draw_number(renderer, game->right_score, win_width * 3.0f / 4.0f - 10.0f, 380.0f, 20.0f, 30.0f, 4.0f, 8.0f);
+
+        if ((ticks / 500) % 2 == 0) {
+            draw_text_centered(renderer, "PRESS ENTER", 480.0f, 3.0f, 2.0f);
+        }
 
         SDL_RenderPresent(renderer);
         return;

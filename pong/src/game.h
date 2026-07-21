@@ -9,10 +9,16 @@
 
 typedef enum {
     GAME_MENU,
+    GAME_PLAY_TYPE_SELECT,
+    GAME_LAN_ROLE_SELECT,
+    GAME_LAN_HOST_WAITING,
+    GAME_LAN_CLIENT_SEARCHING,
     GAME_MODE_SELECT,
+    GAME_WIN_SCORE_SELECT,
     GAME_WAITING,
     GAME_PLAYING,
-    GAME_PAUSED
+    GAME_PAUSED,
+    GAME_OVER
 } GameStateKind;
 
 typedef enum {
@@ -27,14 +33,27 @@ typedef struct {
     GameStateKind paused_from;
     Uint64 state_entered_at;
     GameMode mode;
+    int win_score_index;
+    int win_score;
     bool prev_up;
     bool prev_down;
+    bool prev_left;
+    bool prev_right;
     bool prev_confirm;
     bool prev_escape;
     bool pause_confirm_selected;
+    Uint64 pause_confirm_changed_at;
+    Uint64 mode_changed_at;
+    Uint64 win_score_changed_at;
+    bool play_type_lan_selected;
+    Uint64 play_type_changed_at;
+    bool lan_role_host_selected;
+    Uint64 lan_role_changed_at;
+    bool is_lan_host_match;
     PowerupState powerups;
     Ball balls[MAX_BALLS];
 } GameState;
 
 void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                   const bool *keystate, float deltaTime, Uint64 ticks);
+void game_start_lan_match(GameState *game, Uint64 ticks);
