@@ -197,6 +197,10 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
             game->left_score = 0;
             game->right_score = 0;
             powerup_reset_match(&game->powerups, ticks);
+            reset_ball(&game->balls[0], (SDL_rand(2) == 0) ? 1.0f : -1.0f);
+            for (int i = 1; i < MAX_BALLS; i++) {
+                game->balls[i].active = false;
+            }
             enter_state(game, GAME_WAITING, ticks);
         }
         return;
