@@ -15,7 +15,7 @@ typedef struct {
 static const Uint64 discover_interval_ms = 500;
 
 static bool send_message(NetSession *net, NET_Address *addr, Uint16 port, Uint8 type, const void *payload, int payload_len) {
-    Uint8 buf[512];
+    Uint8 buf[1024];
     if (payload_len + 1 > (int)sizeof(buf)) return false;
     buf[0] = type;
     if (payload_len > 0) {

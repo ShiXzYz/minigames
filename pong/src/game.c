@@ -189,7 +189,7 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
             game->win_score = win_score_options[game->win_score_index];
             game->win_score_changed_at = ticks;
         }
-        if (escape_just_pressed && !game->is_lan_host_match) {
+        if (escape_just_pressed) {
             enter_state(game, GAME_MODE_SELECT, ticks);
             return;
         }
@@ -376,10 +376,9 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
 }
 
 void game_start_lan_match(GameState *game, Uint64 ticks) {
-    game->mode = MODE_CLASSIC;
     game->is_lan_host_match = true;
     game->left_score = 0;
     game->right_score = 0;
     powerup_reset_match(&game->powerups, ticks);
-    enter_state(game, GAME_WIN_SCORE_SELECT, ticks);
+    enter_state(game, GAME_MODE_SELECT, ticks);
 }
