@@ -261,6 +261,76 @@ void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
         return;
     }
 
+    if (game->state == GAME_PLAY_TYPE_SELECT) {
+        draw_text_centered(renderer, "SELECT PLAY TYPE", 100.0f, 6.0f, 3.0f);
+
+        const float local_y = 250.0f;
+        const float lan_y = 340.0f;
+        const float option_pixel = 5.0f;
+        const float option_spacing = 3.0f;
+
+        draw_text_centered(renderer, "LOCAL", local_y, option_pixel, option_spacing);
+        draw_text_centered(renderer, "LAN", lan_y, option_pixel, option_spacing);
+
+        const char *selected_label = game->play_type_lan_selected ? "LAN" : "LOCAL";
+        float selected_y = game->play_type_lan_selected ? lan_y : local_y;
+        float underline_w = text_width(selected_label, option_pixel, option_spacing);
+        SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
+        if (underline_blink_visible(game->play_type_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
+
+        draw_text_centered(renderer, "UP DOWN ENTER ESC", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_LAN_ROLE_SELECT) {
+        draw_text_centered(renderer, "HOST OR JOIN", 100.0f, 6.0f, 3.0f);
+
+        const float host_y = 250.0f;
+        const float join_y = 340.0f;
+        const float option_pixel = 5.0f;
+        const float option_spacing = 3.0f;
+
+        draw_text_centered(renderer, "HOST", host_y, option_pixel, option_spacing);
+        draw_text_centered(renderer, "JOIN", join_y, option_pixel, option_spacing);
+
+        const char *selected_label = game->lan_role_host_selected ? "HOST" : "JOIN";
+        float selected_y = game->lan_role_host_selected ? host_y : join_y;
+        float underline_w = text_width(selected_label, option_pixel, option_spacing);
+        SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
+        if (underline_blink_visible(game->lan_role_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
+
+        draw_text_centered(renderer, "UP DOWN ENTER ESC", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_LAN_HOST_WAITING) {
+        draw_text_centered(renderer, "HOSTING", 200.0f, 7.0f, 4.0f);
+        if ((ticks / 500) % 2 == 0) {
+            draw_text_centered(renderer, "WAITING FOR PLAYER", 350.0f, 3.0f, 2.0f);
+        }
+        draw_text_centered(renderer, "ESC TO CANCEL", 460.0f, 2.0f, 2.0f);
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_LAN_CLIENT_SEARCHING) {
+        draw_text_centered(renderer, "JOINING", 200.0f, 7.0f, 4.0f);
+        if ((ticks / 500) % 2 == 0) {
+            draw_text_centered(renderer, "SEARCHING FOR HOST", 350.0f, 3.0f, 2.0f);
+        }
+        draw_text_centered(renderer, "ESC TO CANCEL", 460.0f, 2.0f, 2.0f);
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
     if (game->state == GAME_PAUSED) {
         draw_text_centered(renderer, "PAUSED", 150.0f, 7.0f, 4.0f);
         draw_text_centered(renderer, "RETURN TO MENU", 280.0f, 4.0f, 3.0f);

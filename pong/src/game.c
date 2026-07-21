@@ -65,6 +65,9 @@ static void enter_state(GameState *game, GameStateKind state, Uint64 ticks) {
     if (state == GAME_WAITING) {
         powerup_reset_round(&game->powerups, ticks);
     }
+    if (state == GAME_MENU) {
+        game->is_lan_host_match = false;
+    }
 }
 
 static void end_point(GameState *game, Uint64 ticks, float serve_direction) {
@@ -126,7 +129,44 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
 
     if (game->state == GAME_MENU) {
         if (confirm_just_pressed) {
-            enter_state(game, GAME_MODE_SELECT, ticks);
+            enter_state(game, GAME_PLAY_TYPE_SELECT, ticks);
+        }
+        return;
+    }
+
+    if (game->state == GAME_PLAY_TYPE_SELECT) {
+        if (up_just_pressed || down_just_pressed) {
+            game->play_type_lan_selected = !game->play_type_lan_selected;
+            game->play_type_changed_at = ticks;
+        }
+        if (escape_just_pressed) {
+            enter_state(game, GAME_MENU, ticks);
+            return;
+        }
+        if (confirm_just_pressed) {
+            enter_state(game, game->play_type_lan_selected ? GAME_LAN_ROLE_SELECT : GAME_MODE_SELECT, ticks);
+        }
+        return;
+    }
+
+    if (game->state == GAME_LAN_ROLE_SELECT) {
+        if (up_just_pressed || down_just_pressed) {
+            game->lan_role_host_selected = !game->lan_role_host_selected;
+            game->lan_role_changed_at = ticks;
+        }
+        if (escape_just_pressed) {
+            enter_state(game, GAME_PLAY_TYPE_SELECT, ticks);
+            return;
+        }
+        if (confirm_just_pressed) {
+            enter_state(game, game->lan_role_host_selected ? GAME_LAN_HOST_WAITING : GAME_LAN_CLIENT_SEARCHING, ticks);
+        }
+        return;
+    }
+
+    if (game->state == GAME_LAN_HOST_WAITING || game->state == GAME_LAN_CLIENT_SEARCHING) {
+        if (escape_just_pressed) {
+            enter_state(game, GAME_LAN_ROLE_SELECT, ticks);
         }
         return;
     }
@@ -149,7 +189,7 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
             game->win_score = win_score_options[game->win_score_index];
             game->win_score_changed_at = ticks;
         }
-        if (escape_just_pressed) {
+        if (escape_just_pressed && !game->is_lan_host_match) {
             enter_state(game, GAME_MODE_SELECT, ticks);
             return;
         }
@@ -164,7 +204,7 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
 
     if (game->state == GAME_OVER) {
         if (confirm_just_pressed) {
-            enter_state(game, GAME_MODE_SELECT, ticks);
+            enter_state(game, game->is_lan_host_match ? GAME_WIN_SCORE_SELECT : GAME_MODE_SELECT, ticks);
         }
         return;
     }
@@ -329,4 +369,13 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
             }
         }
     }
+}
+
+void game_start_lan_match(GameState *game, Uint64 ticks) {
+    game->mode = MODE_CLASSIC;
+    game->is_lan_host_match = true;
+    game->left_score = 0;
+    game->right_score = 0;
+    powerup_reset_match(&game->powerups, ticks);
+    enter_state(game, GAME_WIN_SCORE_SELECT, ticks);
 }

@@ -13,6 +13,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SDL3)
 
+FetchContent_Declare(
+    SDL3_net
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL_net.git
+    GIT_TAG release-3.2.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(SDL3_net)
+
 add_executable(pong
     src/main.c
     src/constants.c
@@ -21,14 +29,18 @@ add_executable(pong
     src/game.c
     src/renderer.c
     src/powerup.c
+    src/net.c
 )
-target_link_libraries(pong PRIVATE SDL3::SDL3)
+target_link_libraries(pong PRIVATE SDL3::SDL3 SDL3_net::SDL3_net)
 
-# Copy the SDL3 DLL next to the exe so `pong.exe` runs without installing SDL system-wide.
+# Copy the SDL3/SDL3_net DLLs next to the exe so `pong.exe` runs without installing SDL system-wide.
 if(WIN32)
     add_custom_command(TARGET pong POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:SDL3::SDL3>
+            $<TARGET_FILE_DIR:pong>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:SDL3_net::SDL3_net>
             $<TARGET_FILE_DIR:pong>
     )
 endif()
