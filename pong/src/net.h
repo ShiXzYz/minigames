@@ -5,6 +5,7 @@
 #include <SDL3_net/SDL_net.h>
 
 #include "ball.h"
+#include "powerup.h"
 
 #define PONG_NET_PORT 7777
 
@@ -21,16 +22,35 @@ typedef struct {
 } NetBallSnapshot;
 
 typedef struct {
+    Sint32 type;
+    bool affects_left;
+    bool in_use;
+    float extra;
+    Uint32 remaining_ms;
+} NetEffectSnapshot;
+
+typedef struct {
     Sint32 state;
+    Sint32 mode;
     Sint32 win_score;
     Sint32 left_score;
     Sint32 right_score;
     bool pause_confirm_selected;
     bool win_score_underline_visible;
     bool pause_underline_visible;
+    bool mode_underline_visible;
     SDL_FRect left_paddle_rect;
     SDL_FRect right_paddle_rect;
     NetBallSnapshot balls[MAX_BALLS];
+
+    int left_shields;
+    int right_shields;
+    SDL_FRect pickup_rect;
+    bool pickup_active;
+    bool has_last_activated;
+    Sint32 last_activated_type;
+    Uint32 last_activated_elapsed_ms;
+    NetEffectSnapshot effects[MAX_ACTIVE_EFFECTS];
 } NetSnapshot;
 
 typedef struct {

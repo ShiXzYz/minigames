@@ -17,15 +17,33 @@ static bool net_blink_visible(Uint64 changed_at, Uint64 ticks) {
     return (elapsed / blink_interval) % 2 == 0;
 }
 
+// Effect expiry / announcement timestamps are host-clock values, meaningless on the
+// client (independent SDL_GetTicks() epochs), so the wire format carries a duration
+// instead: how much time is left (or has elapsed), which either side can convert
+// to/from its own local timestamp.
+static Uint32 remaining_ms_until(Uint64 expires_at, Uint64 ticks) {
+    if (expires_at <= ticks) return 0;
+    Uint64 remaining = expires_at - ticks;
+    return (remaining > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (Uint32)remaining;
+}
+
+static Uint32 elapsed_ms_since(Uint64 started_at, Uint64 ticks) {
+    if (ticks <= started_at) return 0;
+    Uint64 elapsed = ticks - started_at;
+    return (elapsed > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (Uint32)elapsed;
+}
+
 static NetSnapshot build_snapshot(const GameState *game, const Paddle *left_paddle, const Paddle *right_paddle, Uint64 ticks) {
     NetSnapshot snap = { 0 };
     snap.state = (Sint32)game->state;
+    snap.mode = (Sint32)game->mode;
     snap.win_score = game->win_score;
     snap.left_score = game->left_score;
     snap.right_score = game->right_score;
     snap.pause_confirm_selected = game->pause_confirm_selected;
     snap.win_score_underline_visible = net_blink_visible(game->win_score_changed_at, ticks);
     snap.pause_underline_visible = net_blink_visible(game->pause_confirm_changed_at, ticks);
+    snap.mode_underline_visible = net_blink_visible(game->mode_changed_at, ticks);
     snap.left_paddle_rect = left_paddle->rect;
     snap.right_paddle_rect = right_paddle->rect;
     for (int i = 0; i < MAX_BALLS; i++) {
@@ -33,23 +51,42 @@ static NetSnapshot build_snapshot(const GameState *game, const Paddle *left_padd
         snap.balls[i].active = game->balls[i].active;
         snap.balls[i].held = game->balls[i].held;
     }
+
+    snap.left_shields = game->powerups.left_shields;
+    snap.right_shields = game->powerups.right_shields;
+    snap.pickup_rect = game->powerups.pickup.rect;
+    snap.pickup_active = game->powerups.pickup.active;
+    snap.has_last_activated = game->powerups.has_last_activated;
+    snap.last_activated_type = (Sint32)game->powerups.last_activated_type;
+    snap.last_activated_elapsed_ms = elapsed_ms_since(game->powerups.last_activated_at, ticks);
+    for (int i = 0; i < MAX_ACTIVE_EFFECTS; i++) {
+        const ActiveEffect *e = &game->powerups.effects[i];
+        NetEffectSnapshot *ne = &snap.effects[i];
+        ne->type = (Sint32)e->type;
+        ne->affects_left = e->affects_left;
+        ne->in_use = e->in_use;
+        ne->extra = e->extra;
+        ne->remaining_ms = remaining_ms_until(e->expires_at, ticks);
+    }
+
     return snap;
 }
 
-// Translates the host's precomputed blink flags into a local timestamp that makes
-// underline_blink_visible() (in renderer.c, driven by the client's own clock) agree
-// with the host's intent for this frame, since the two processes' SDL_GetTicks()
-// epochs aren't synchronized.
+// Translates the host's precomputed blink flags / durations into local timestamps that
+// make underline_blink_visible() and powerup_is_active() (both driven by the client's
+// own clock, in renderer.c / powerup.c) agree with the host's intent for this frame,
+// since the two processes' SDL_GetTicks() epochs aren't synchronized.
 static void apply_snapshot_to_game(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                                     const NetSnapshot *snap, Uint64 ticks) {
     game->state = (GameStateKind)snap->state;
-    game->mode = MODE_CLASSIC;
+    game->mode = (GameMode)snap->mode;
     game->win_score = snap->win_score;
     game->left_score = snap->left_score;
     game->right_score = snap->right_score;
     game->pause_confirm_selected = snap->pause_confirm_selected;
     game->win_score_changed_at = ticks - (snap->win_score_underline_visible ? 9999 : 80);
     game->pause_confirm_changed_at = ticks - (snap->pause_underline_visible ? 9999 : 80);
+    game->mode_changed_at = ticks - (snap->mode_underline_visible ? 9999 : 80);
 
     left_paddle->rect = snap->left_paddle_rect;
     right_paddle->rect = snap->right_paddle_rect;
@@ -58,6 +95,23 @@ static void apply_snapshot_to_game(GameState *game, Paddle *left_paddle, Paddle 
         game->balls[i].rect = snap->balls[i].rect;
         game->balls[i].active = snap->balls[i].active;
         game->balls[i].held = snap->balls[i].held;
+    }
+
+    game->powerups.left_shields = snap->left_shields;
+    game->powerups.right_shields = snap->right_shields;
+    game->powerups.pickup.rect = snap->pickup_rect;
+    game->powerups.pickup.active = snap->pickup_active;
+    game->powerups.has_last_activated = snap->has_last_activated;
+    game->powerups.last_activated_type = (PowerupType)snap->last_activated_type;
+    game->powerups.last_activated_at = ticks - snap->last_activated_elapsed_ms;
+    for (int i = 0; i < MAX_ACTIVE_EFFECTS; i++) {
+        const NetEffectSnapshot *ne = &snap->effects[i];
+        ActiveEffect *e = &game->powerups.effects[i];
+        e->type = (PowerupType)ne->type;
+        e->affects_left = ne->affects_left;
+        e->in_use = ne->in_use;
+        e->extra = ne->extra;
+        e->expires_at = ticks + ne->remaining_ms;
     }
 }
 
