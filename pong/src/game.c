@@ -84,6 +84,18 @@ static bool any_ball_active(const GameState *game) {
     return false;
 }
 
+static bool check_for_win(GameState *game, Uint64 ticks) {
+    if (game->win_score < 0) return false;
+    if (game->left_score < game->win_score && game->right_score < game->win_score) return false;
+
+    for (int i = 0; i < MAX_BALLS; i++) {
+        game->balls[i].active = false;
+        game->balls[i].held = false;
+    }
+    enter_state(game, GAME_OVER, ticks);
+    return true;
+}
+
 void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                   const bool *keystate, float deltaTime, Uint64 ticks) {
     if (game->state != GAME_PAUSED) {
@@ -94,16 +106,22 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
     bool confirm_pressed = keystate[SDL_SCANCODE_RETURN] || keystate[SDL_SCANCODE_KP_ENTER];
     bool up_pressed = keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_W];
     bool down_pressed = keystate[SDL_SCANCODE_DOWN] || keystate[SDL_SCANCODE_S];
+    bool left_pressed = keystate[SDL_SCANCODE_LEFT];
+    bool right_pressed = keystate[SDL_SCANCODE_RIGHT];
     bool escape_pressed = keystate[SDL_SCANCODE_ESCAPE];
 
     bool confirm_just_pressed = confirm_pressed && !game->prev_confirm;
     bool up_just_pressed = up_pressed && !game->prev_up;
     bool down_just_pressed = down_pressed && !game->prev_down;
+    bool left_just_pressed = left_pressed && !game->prev_left;
+    bool right_just_pressed = right_pressed && !game->prev_right;
     bool escape_just_pressed = escape_pressed && !game->prev_escape;
 
     game->prev_confirm = confirm_pressed;
     game->prev_up = up_pressed;
     game->prev_down = down_pressed;
+    game->prev_left = left_pressed;
+    game->prev_right = right_pressed;
     game->prev_escape = escape_pressed;
 
     if (game->state == GAME_MENU) {
@@ -116,6 +134,24 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
     if (game->state == GAME_MODE_SELECT) {
         if (up_just_pressed || down_just_pressed) {
             game->mode = (game->mode == MODE_CLASSIC) ? MODE_POWER_PLAY : MODE_CLASSIC;
+            game->mode_changed_at = ticks;
+        }
+        if (confirm_just_pressed) {
+            enter_state(game, GAME_WIN_SCORE_SELECT, ticks);
+        }
+        return;
+    }
+
+    if (game->state == GAME_WIN_SCORE_SELECT) {
+        if (left_just_pressed || right_just_pressed) {
+            int dir = right_just_pressed ? 1 : -1;
+            game->win_score_index = (game->win_score_index + dir + win_score_options_count) % win_score_options_count;
+            game->win_score = win_score_options[game->win_score_index];
+            game->win_score_changed_at = ticks;
+        }
+        if (escape_just_pressed) {
+            enter_state(game, GAME_MODE_SELECT, ticks);
+            return;
         }
         if (confirm_just_pressed) {
             game->left_score = 0;
@@ -126,9 +162,17 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
         return;
     }
 
+    if (game->state == GAME_OVER) {
+        if (confirm_just_pressed) {
+            enter_state(game, GAME_MODE_SELECT, ticks);
+        }
+        return;
+    }
+
     if (game->state == GAME_PAUSED) {
         if (up_just_pressed || down_just_pressed) {
             game->pause_confirm_selected = !game->pause_confirm_selected;
+            game->pause_confirm_changed_at = ticks;
         }
         if (escape_just_pressed) {
             enter_state(game, game->paused_from, ticks);
@@ -175,8 +219,13 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                 game->balls[0].vy += split_spread;
             }
         }
-        if (!powerup_is_active_any(&game->powerups, POWERUP_SPLIT_SHOT, ticks)) {
+        if (game->balls[1].active && !powerup_is_active_any(&game->powerups, POWERUP_SPLIT_SHOT, ticks)) {
+            float fallback_direction = (game->balls[1].vx >= 0.0f) ? 1.0f : -1.0f;
             game->balls[1].active = false;
+            if (!any_ball_active(game)) {
+                end_point(game, ticks, fallback_direction);
+                return;
+            }
         }
     }
 
@@ -226,12 +275,16 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
         ball_update(ball, deltaTime, speed_scale);
 
         if (ball->rect.x + ball->rect.w < 0) {
-            if (!(power_play && powerup_consume_shield(&game->powerups, true))) {
+            bool scored = !(power_play && powerup_consume_shield(&game->powerups, true));
+            if (scored) {
                 game->right_score++;
                 SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
             }
             ball->active = false;
             ball->held = false;
+            if (scored && check_for_win(game, ticks)) {
+                break;
+            }
             if (!any_ball_active(game)) {
                 end_point(game, ticks, 1.0f);
                 break;
@@ -240,12 +293,16 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
         }
 
         if (ball->rect.x > win_width) {
-            if (!(power_play && powerup_consume_shield(&game->powerups, false))) {
+            bool scored = !(power_play && powerup_consume_shield(&game->powerups, false));
+            if (scored) {
                 game->left_score++;
                 SDL_Log("Left: %d   Right: %d", game->left_score, game->right_score);
             }
             ball->active = false;
             ball->held = false;
+            if (scored && check_for_win(game, ticks)) {
+                break;
+            }
             if (!any_ball_active(game)) {
                 end_point(game, ticks, -1.0f);
                 break;

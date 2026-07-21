@@ -34,6 +34,8 @@ int main(int argc, char *argv[]) {
     Paddle right_paddle = { { 750.0f, win_height / 2.0f - paddle_height / 2.0f, paddle_width, paddle_height }, 0.0f };
 
     GameState game = { 0, 0, GAME_MENU, 0 };
+    game.win_score_index = 2;
+    game.win_score = win_score_options[game.win_score_index];
     game.balls[0].rect = (SDL_FRect){ win_width / 2.0f - ball_size / 2.0f, win_height / 2.0f - ball_size / 2.0f, ball_size, ball_size };
     game.balls[0].vx = ball_start_speed;
     game.balls[0].vy = -ball_start_speed;

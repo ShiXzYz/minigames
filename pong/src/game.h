@@ -10,9 +10,11 @@
 typedef enum {
     GAME_MENU,
     GAME_MODE_SELECT,
+    GAME_WIN_SCORE_SELECT,
     GAME_WAITING,
     GAME_PLAYING,
-    GAME_PAUSED
+    GAME_PAUSED,
+    GAME_OVER
 } GameStateKind;
 
 typedef enum {
@@ -27,11 +29,18 @@ typedef struct {
     GameStateKind paused_from;
     Uint64 state_entered_at;
     GameMode mode;
+    int win_score_index;
+    int win_score;
     bool prev_up;
     bool prev_down;
+    bool prev_left;
+    bool prev_right;
     bool prev_confirm;
     bool prev_escape;
     bool pause_confirm_selected;
+    Uint64 pause_confirm_changed_at;
+    Uint64 mode_changed_at;
+    Uint64 win_score_changed_at;
     PowerupState powerups;
     Ball balls[MAX_BALLS];
 } GameState;
