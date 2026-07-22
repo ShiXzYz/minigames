@@ -10,6 +10,8 @@
 typedef enum {
     GAME_MENU,
     GAME_PLAY_TYPE_SELECT,
+    GAME_PLAYER_COUNT_SELECT,
+    GAME_DIFFICULTY_SELECT,
     GAME_LAN_ROLE_SELECT,
     GAME_LAN_HOST_WAITING,
     GAME_LAN_CLIENT_SEARCHING,
@@ -25,6 +27,19 @@ typedef enum {
     MODE_CLASSIC,
     MODE_POWER_PLAY
 } GameMode;
+
+typedef enum {
+    PLAY_TYPE_LOCAL,
+    PLAY_TYPE_LAN,
+    PLAY_TYPE_COUNT
+} PlayType;
+
+typedef enum {
+    AI_EASY,
+    AI_NORMAL,
+    AI_HARD,
+    AI_DIFFICULTY_COUNT
+} AiDifficulty;
 
 typedef struct {
     int left_score;
@@ -45,11 +60,19 @@ typedef struct {
     Uint64 pause_confirm_changed_at;
     Uint64 mode_changed_at;
     Uint64 win_score_changed_at;
-    bool play_type_lan_selected;
+    int play_type_index;
     Uint64 play_type_changed_at;
+    bool two_player_selected;
+    Uint64 player_count_changed_at;
     bool lan_role_host_selected;
     Uint64 lan_role_changed_at;
     bool is_lan_host_match;
+    bool vs_ai;
+    int ai_difficulty_index;
+    AiDifficulty ai_difficulty;
+    Uint64 difficulty_changed_at;
+    float ai_target_y;
+    Uint64 ai_reaction_at;
     PowerupState powerups;
     Ball balls[MAX_BALLS];
 } GameState;

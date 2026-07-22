@@ -9,6 +9,82 @@ static const float split_spread = 150.0f;
 static const float hold_bob_speed = 3.0f;
 static const float hold_bob_range = 80.0f;
 
+typedef struct {
+    Uint64 reaction_interval_ms;
+    float error_amplitude;
+    bool use_prediction;
+    float dead_zone;
+    float speed_mult;
+} AiParams;
+
+// Easy/normal stay at full paddle speed but track sloppily; hard reads the ball's full
+// trajectory (including wall bounces) but is capped below full speed so it's still
+// beatable with well-angled or spin shots instead of being unbeatable by construction.
+static const AiParams ai_params[AI_DIFFICULTY_COUNT] = {
+    [AI_EASY]   = { 280, 42.0f, false, 15.0f, 1.00f },
+    [AI_NORMAL] = { 140, 20.0f, false,  9.0f, 1.00f },
+    [AI_HARD]   = { 130, 15.0f, true,   9.0f, 0.78f },
+};
+
+static const Ball *ai_select_target_ball(const GameState *game) {
+    const Ball *best = NULL;
+    for (int i = 0; i < MAX_BALLS; i++) {
+        const Ball *b = &game->balls[i];
+        if (!b->active || b->held || b->vx <= 0.0f) continue;
+        if (!best || b->rect.x > best->rect.x) best = b;
+    }
+    return best;
+}
+
+// Reflects the ball's straight-line trajectory off the top/bottom walls to estimate
+// its y position when it reaches the paddle's x, without simulating paddle bounces.
+static float ai_predict_target_y(const Ball *ball, float paddle_x) {
+    float ball_front_x = ball->rect.x + ball->rect.w;
+    float time_to_reach = (ball->vx > 0.0001f) ? (paddle_x - ball_front_x) / ball->vx : 0.0f;
+    if (time_to_reach < 0.0f) time_to_reach = 0.0f;
+
+    float range = win_height - ball->rect.h;
+    if (range <= 0.0f) return ball->rect.y + ball->rect.h / 2.0f;
+
+    float raw_y = ball->rect.y + ball->vy * time_to_reach;
+    float m = fmodf(raw_y, 2.0f * range);
+    if (m < 0.0f) m += 2.0f * range;
+    float predicted_y = (m <= range) ? m : (2.0f * range - m);
+    return predicted_y + ball->rect.h / 2.0f;
+}
+
+static void ai_compute_input(GameState *game, const Paddle *right_paddle, Uint64 ticks, bool *want_up, bool *want_down) {
+    *want_up = false;
+    *want_down = false;
+
+    const AiParams *params = &ai_params[game->ai_difficulty];
+
+    if (ticks >= game->ai_reaction_at) {
+        const Ball *target_ball = ai_select_target_ball(game);
+        float base_target;
+        if (target_ball) {
+            base_target = params->use_prediction
+                ? ai_predict_target_y(target_ball, right_paddle->rect.x)
+                : (target_ball->rect.y + target_ball->rect.h / 2.0f);
+        } else {
+            base_target = win_height / 2.0f;
+        }
+
+        float error = ((float)SDL_rand(2001) - 1000.0f) / 1000.0f * params->error_amplitude;
+        game->ai_target_y = SDL_clamp(base_target + error, 0.0f, win_height);
+        game->ai_reaction_at = ticks + params->reaction_interval_ms;
+    }
+
+    float paddle_center = right_paddle->rect.y + right_paddle->rect.h / 2.0f;
+    float diff = game->ai_target_y - paddle_center;
+
+    if (diff > params->dead_zone) {
+        *want_down = true;
+    } else if (diff < -params->dead_zone) {
+        *want_up = true;
+    }
+}
+
 static bool resolve_ball_paddle_collision(Ball *ball, SDL_FRect prev_rect, Paddle *paddle, bool paddle_is_left,
                                            const PowerupState *powerups, Uint64 ticks) {
     bool is_colliding = SDL_HasRectIntersectionFloat(&ball->rect, &paddle->rect);
@@ -67,6 +143,7 @@ static void enter_state(GameState *game, GameStateKind state, Uint64 ticks) {
     }
     if (state == GAME_MENU) {
         game->is_lan_host_match = false;
+        game->vs_ai = false;
     }
 }
 
@@ -102,8 +179,21 @@ static bool check_for_win(GameState *game, Uint64 ticks) {
 void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
                   const bool *keystate, float deltaTime, Uint64 ticks) {
     if (game->state != GAME_PAUSED) {
-        paddle_update(left_paddle, keystate, SDL_SCANCODE_W, SDL_SCANCODE_S, deltaTime, &game->powerups, true, ticks);
-        paddle_update(right_paddle, keystate, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, deltaTime, &game->powerups, false, ticks);
+        bool left_up = keystate[SDL_SCANCODE_W];
+        bool left_down = keystate[SDL_SCANCODE_S];
+
+        bool right_up, right_down;
+        float right_speed_mult = 1.0f;
+        if (game->vs_ai && (game->state == GAME_WAITING || game->state == GAME_PLAYING)) {
+            ai_compute_input(game, right_paddle, ticks, &right_up, &right_down);
+            right_speed_mult = ai_params[game->ai_difficulty].speed_mult;
+        } else {
+            right_up = keystate[SDL_SCANCODE_UP];
+            right_down = keystate[SDL_SCANCODE_DOWN];
+        }
+
+        paddle_update(left_paddle, left_up, left_down, 1.0f, deltaTime, &game->powerups, true, ticks);
+        paddle_update(right_paddle, right_up, right_down, right_speed_mult, deltaTime, &game->powerups, false, ticks);
     }
 
     bool confirm_pressed = keystate[SDL_SCANCODE_RETURN] || keystate[SDL_SCANCODE_KP_ENTER];
@@ -135,8 +225,12 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
     }
 
     if (game->state == GAME_PLAY_TYPE_SELECT) {
-        if (up_just_pressed || down_just_pressed) {
-            game->play_type_lan_selected = !game->play_type_lan_selected;
+        if (up_just_pressed) {
+            game->play_type_index = (game->play_type_index - 1 + PLAY_TYPE_COUNT) % PLAY_TYPE_COUNT;
+            game->play_type_changed_at = ticks;
+        }
+        if (down_just_pressed) {
+            game->play_type_index = (game->play_type_index + 1) % PLAY_TYPE_COUNT;
             game->play_type_changed_at = ticks;
         }
         if (escape_just_pressed) {
@@ -144,7 +238,53 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
             return;
         }
         if (confirm_just_pressed) {
-            enter_state(game, game->play_type_lan_selected ? GAME_LAN_ROLE_SELECT : GAME_MODE_SELECT, ticks);
+            if (game->play_type_index == PLAY_TYPE_LAN) {
+                game->vs_ai = false;
+                enter_state(game, GAME_LAN_ROLE_SELECT, ticks);
+            } else {
+                enter_state(game, GAME_PLAYER_COUNT_SELECT, ticks);
+            }
+        }
+        return;
+    }
+
+    if (game->state == GAME_PLAYER_COUNT_SELECT) {
+        if (up_just_pressed || down_just_pressed) {
+            game->two_player_selected = !game->two_player_selected;
+            game->player_count_changed_at = ticks;
+        }
+        if (escape_just_pressed) {
+            enter_state(game, GAME_PLAY_TYPE_SELECT, ticks);
+            return;
+        }
+        if (confirm_just_pressed) {
+            if (game->two_player_selected) {
+                game->vs_ai = false;
+                enter_state(game, GAME_MODE_SELECT, ticks);
+            } else {
+                game->vs_ai = true;
+                enter_state(game, GAME_DIFFICULTY_SELECT, ticks);
+            }
+        }
+        return;
+    }
+
+    if (game->state == GAME_DIFFICULTY_SELECT) {
+        if (up_just_pressed) {
+            game->ai_difficulty_index = (game->ai_difficulty_index - 1 + AI_DIFFICULTY_COUNT) % AI_DIFFICULTY_COUNT;
+            game->difficulty_changed_at = ticks;
+        }
+        if (down_just_pressed) {
+            game->ai_difficulty_index = (game->ai_difficulty_index + 1) % AI_DIFFICULTY_COUNT;
+            game->difficulty_changed_at = ticks;
+        }
+        if (escape_just_pressed) {
+            enter_state(game, GAME_PLAYER_COUNT_SELECT, ticks);
+            return;
+        }
+        if (confirm_just_pressed) {
+            game->ai_difficulty = (AiDifficulty)game->ai_difficulty_index;
+            enter_state(game, GAME_MODE_SELECT, ticks);
         }
         return;
     }
@@ -175,6 +315,10 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
         if (up_just_pressed || down_just_pressed) {
             game->mode = (game->mode == MODE_CLASSIC) ? MODE_POWER_PLAY : MODE_CLASSIC;
             game->mode_changed_at = ticks;
+        }
+        if (escape_just_pressed && !game->is_lan_host_match) {
+            enter_state(game, game->vs_ai ? GAME_DIFFICULTY_SELECT : GAME_PLAYER_COUNT_SELECT, ticks);
+            return;
         }
         if (confirm_just_pressed) {
             enter_state(game, GAME_WIN_SCORE_SELECT, ticks);
@@ -207,6 +351,10 @@ void game_update(GameState *game, Paddle *left_paddle, Paddle *right_paddle,
     }
 
     if (game->state == GAME_OVER) {
+        if (escape_just_pressed) {
+            enter_state(game, GAME_WIN_SCORE_SELECT, ticks);
+            return;
+        }
         if (confirm_just_pressed) {
             enter_state(game, game->is_lan_host_match ? GAME_WIN_SCORE_SELECT : GAME_MODE_SELECT, ticks);
         }
