@@ -90,10 +90,25 @@ static const int question_mark_glyph[7] = {
     0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b00000, 0b00100,
 };
 
+static const int digit5x7[10][7] = {
+    { 0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110 }, // 0
+    { 0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110 }, // 1
+    { 0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111 }, // 2
+    { 0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110 }, // 3
+    { 0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010 }, // 4
+    { 0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110 }, // 5
+    { 0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110 }, // 6
+    { 0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000 }, // 7
+    { 0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110 }, // 8
+    { 0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100 }, // 9
+};
+
 static void draw_char(SDL_Renderer *renderer, char c, float x, float y, float pixel) {
     const int *rows;
     if (c >= 'A' && c <= 'Z') {
         rows = font5x7[c - 'A'];
+    } else if (c >= '0' && c <= '9') {
+        rows = digit5x7[c - '0'];
     } else if (c == '?') {
         rows = question_mark_glyph;
     } else {
@@ -264,16 +279,18 @@ void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
     if (game->state == GAME_PLAY_TYPE_SELECT) {
         draw_text_centered(renderer, "SELECT PLAY TYPE", 100.0f, 6.0f, 3.0f);
 
-        const float local_y = 250.0f;
-        const float lan_y = 340.0f;
+        static const char *play_type_labels[PLAY_TYPE_COUNT] = { "LOCAL", "LAN" };
         const float option_pixel = 5.0f;
         const float option_spacing = 3.0f;
+        const float first_y = 250.0f;
+        const float row_gap = 90.0f;
 
-        draw_text_centered(renderer, "LOCAL", local_y, option_pixel, option_spacing);
-        draw_text_centered(renderer, "LAN", lan_y, option_pixel, option_spacing);
+        for (int i = 0; i < PLAY_TYPE_COUNT; i++) {
+            draw_text_centered(renderer, play_type_labels[i], first_y + i * row_gap, option_pixel, option_spacing);
+        }
 
-        const char *selected_label = game->play_type_lan_selected ? "LAN" : "LOCAL";
-        float selected_y = game->play_type_lan_selected ? lan_y : local_y;
+        const char *selected_label = play_type_labels[game->play_type_index];
+        float selected_y = first_y + game->play_type_index * row_gap;
         float underline_w = text_width(selected_label, option_pixel, option_spacing);
         SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
         if (underline_blink_visible(game->play_type_changed_at, ticks)) {
@@ -281,6 +298,58 @@ void render_frame(SDL_Renderer *renderer, const Paddle *left_paddle,
         }
 
         draw_text_centered(renderer, "UP DOWN ENTER ESC", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_PLAYER_COUNT_SELECT) {
+        draw_text_centered(renderer, "SELECT PLAYERS", 100.0f, 6.0f, 3.0f);
+
+        const float one_player_y = 250.0f;
+        const float two_player_y = 340.0f;
+        const float option_pixel = 5.0f;
+        const float option_spacing = 3.0f;
+
+        draw_text_centered(renderer, "1P", one_player_y, option_pixel, option_spacing);
+        draw_text_centered(renderer, "2P", two_player_y, option_pixel, option_spacing);
+
+        const char *selected_label = game->two_player_selected ? "2P" : "1P";
+        float selected_y = game->two_player_selected ? two_player_y : one_player_y;
+        float underline_w = text_width(selected_label, option_pixel, option_spacing);
+        SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
+        if (underline_blink_visible(game->player_count_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
+
+        draw_text_centered(renderer, "UP DOWN ENTER ESC", 480.0f, 2.0f, 2.0f);
+
+        SDL_RenderPresent(renderer);
+        return;
+    }
+
+    if (game->state == GAME_DIFFICULTY_SELECT) {
+        draw_text_centered(renderer, "SELECT DIFFICULTY", 100.0f, 6.0f, 3.0f);
+
+        static const char *difficulty_labels[AI_DIFFICULTY_COUNT] = { "EASY", "NORMAL", "HARD" };
+        const float option_pixel = 5.0f;
+        const float option_spacing = 3.0f;
+        const float first_y = 220.0f;
+        const float row_gap = 90.0f;
+
+        for (int i = 0; i < AI_DIFFICULTY_COUNT; i++) {
+            draw_text_centered(renderer, difficulty_labels[i], first_y + i * row_gap, option_pixel, option_spacing);
+        }
+
+        const char *selected_label = difficulty_labels[game->ai_difficulty_index];
+        float selected_y = first_y + game->ai_difficulty_index * row_gap;
+        float underline_w = text_width(selected_label, option_pixel, option_spacing);
+        SDL_FRect underline = { win_width / 2.0f - underline_w / 2.0f, selected_y + 7.0f * option_pixel + 6.0f, underline_w, 3.0f };
+        if (underline_blink_visible(game->difficulty_changed_at, ticks)) {
+            SDL_RenderFillRect(renderer, &underline);
+        }
+
+        draw_text_centered(renderer, "UP DOWN ENTER ESC", 520.0f, 2.0f, 2.0f);
 
         SDL_RenderPresent(renderer);
         return;
