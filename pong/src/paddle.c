@@ -7,6 +7,9 @@ void paddle_update(Paddle *paddle, const bool *keystate, SDL_Scancode up_key, SD
     if (powerup_is_active(powerups, POWERUP_SPEED_BOOST, is_left, ticks)) {
         speed *= 2.0f;
     }
+    if (powerup_is_active_any(powerups, POWERUP_SLOW_MOTION, ticks)) {
+        speed *= 0.5f;
+    }
 
     float height_mult = 1.0f;
     if (powerup_is_active(powerups, POWERUP_GIANT_PADDLE, is_left, ticks)) {
